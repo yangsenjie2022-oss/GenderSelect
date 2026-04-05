@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.idea/
+.vscode/
+
+.venv/
+venv/
+env/
+
+output/
+checkpoints/
+
+*.log
+*.tmp
