@@ -1,101 +1,117 @@
-# 性别进化模拟系统
+# GenderSelect / 性别选择进化模拟
 
-探究人群在资源压力下的分工、繁殖与竞争的进化模拟（能力驱动版本）。
+GenderSelect is a Python simulation framework for exploring why a "male slightly stronger, female slightly weaker" pattern may emerge in human evolutionary contexts, and under what conditions this pattern does or does not appear.
 
-## About
+GenderSelect 是一个 Python 演化模拟框架，用于探索智人演化中“雄性略强、雌性略弱”这一现象在何种生态与社会条件下会涌现、何种条件下不会涌现。
 
-GenderSelect is a Python simulation project for researching sex-selection patterns and why a "male slightly stronger than female" phenotype may emerge under long-term ecological and social pressures.
+## Research Motivation / 研究动机
 
-## 核心问题
+My original motivation is:
 
-本模拟当前版本聚焦：
-- 个体能力差异（体力/智力）如何影响分工
-- 狩猎风险引入的受伤状态如何影响长期生产力与死亡率
-- 多部落竞争如何改变人口与资源格局
+> The repository is python code for Gender Select Pattern research for why male is stronger than female; which lead by my thought: male is less significant than female in the revolution condition, which cause male need to do more jobs with huge risk like hunting. High revolution pressure lead high strength gen expression, which make male stronger.
 
-## 模拟设计
+This project extends that intuition into a testable simulation hypothesis:
 
-### 人群结构
-- 默认使用 **ability_multi_tribe**：多个部落，个体能力连续分布，不预设三种“强弱关系”群体。
+- Reproductive asymmetry may make female survival more critical to population recovery.
+- Under high ecological and inter-group pressure, high-risk tasks (for example hunting and combat exposure) may be disproportionately allocated to individuals with stronger effective performance.
+- Over long time horizons, division of labor, mating preference, injury risk, and resource constraints may jointly shape sex-differentiated trait expression.
 
-### 进化机制
-- **活动分配**: 默认采用能力驱动分配（谁更适合谁去狩猎）
-- **资源生产**: 狩猎(高风险高回报) vs 采集(低风险稳定)
-- **受伤机制**: 狩猎可能受伤，受伤者可继续工作但效率下降；可恢复或恶化至死亡
-- **繁殖机制**: 考虑资源、年龄、竞争、跨部落交配
-- **死亡率**: 基础死亡 + 狩猎风险 + 年龄风险
-- **部落竞争**: 资源争夺
+Important note:
 
-### 技术特点
-- **依赖注入**: 所有机制通过DI容器管理，高度可扩展
-- **存档系统**: 支持检查点保存和续跑
-- **可视化**: 生成人口动态、资源分析、进化轨迹等图表
+- This repository is for computational hypothesis testing, not for value judgment.
+- Results are model-dependent and should be interpreted with caution.
 
-## 运行方式
+本项目将以上直觉转化为可检验假设，并强调：
+
+- 生育成本不对称可能使雌性存活在种群恢复中更关键。
+- 在高生态压力和高竞争压力下，高风险任务会更可能分配给高有效表现个体。
+- 长期上，分工、择偶偏好、受伤风险与资源约束的联合作用，可能塑造性别差异化表现。
+- 本项目用于计算实验与假设检验，不包含价值判断。
+
+## Core Questions / 核心问题
+
+- Can a "male slightly stronger" phenotype emerge without hard-coding that outcome?
+- How do hunting risk, injury dynamics, fertility constraints, and resource scarcity interact?
+- Is the observed pattern robust across different environments and competition intensities?
+- Which traits are favored in mating, birth, and offspring survival stages?
+
+## Model Highlights / 模型亮点
+
+- **Ability-driven assignment / 能力驱动分工**: no fixed 3-group preset in behavior assignment.
+- **Injury dynamics / 受伤机制**: injury, recovery, worsening, and efficiency loss.
+- **Shared carrying capacity / 共享K值**: food/productivity-driven S-curve pressure.
+- **Evolvable mate preference / 可遗传择偶偏好**: resource/strength/intelligence/communication preference ratios.
+- **Sex-specific expression genes / 性别特异表达基因**: expression can diverge through inheritance and mutation.
+- **Three-stage selection metrics / 三阶段选择统计**:
+  - mating stage
+  - conception/birth stage
+  - offspring survival stage
+
+## Runtime Modes / 运行模式
 
 ```bash
-# 运行默认场景
-python main.py
+# 1) Run with finite months / 有限月数运行
+python main.py --preset default --months 1200
 
-# 运行丰饶环境（推荐）
-python main.py --preset abundant_environment
+# 2) Long-running interactive mode / 持续运行（直到 stop）
+python main.py --months -1 --report-interval 12 --run-name exp_live_01
 
-# 运行更多部落网络场景
-python main.py --preset many_tribes
-
-# 查看所有预设
-python main.py --list-presets
-
-# 从检查点继续
+# 3) Resume from latest checkpoint / 从最新检查点继续
 python main.py --checkpoint auto
+
+# 4) List presets / 查看预设
+python main.py --list-presets
 ```
 
-## 模拟结果
+In interactive mode, you can type commands:
 
-### 当前输出指标
-- 各部落人口与资源时间序列
-- 受伤率与累计受伤负担
-- 出生/死亡/存活率
-- 生产力与战斗力对比
+- `help`, `status`, `report`, `stop`, `checkpoint`, `plots`
+- `set <scope.attr> <value>` (for runtime parameter injection)
+- Example: `set mortality.base_mortality 0.0015`
 
-## 建模说明
+## Outputs / 输出
 
-当前版本不再将“雄强/雌强/相当”作为主状态变量，而是让差异通过连续能力值与受伤状态自然涌现。
+- Per-run directory: `output/<run_name>/`
+- Monthly CSV: `output/<run_name>/monthly_stats.csv`
+- Optional plots (if matplotlib installed)
 
-## 项目结构
+Main tracked outputs include:
 
-```
+- population, birth/death rates (total + sex-specific)
+- innate/phenotypic strength statistics (mean + median)
+- strength expression coefficients
+- mate preference ratios
+- three-stage selection indicators
+
+## Project Structure / 项目结构
+
+```text
 simulation/
-├── container.py          # 依赖注入容器
-├── models.py             # 核心模型(Individual, Tribe)
-├── mechanisms.py         # 进化机制
-├── simulator.py          # 模拟引擎
-├── visualization.py      # 可视化
-└── config_registry.py    # 配置注册表
+  container.py
+  models.py
+  mechanisms.py
+  simulator.py
+  visualization.py
+  config_registry.py
+  csv_exporter.py
 
-main.py                   # 主程序入口
-run.py                    # 快速运行脚本
+main.py
+run.py
 ```
 
-## 可配置参数
-
-所有进化参数都可通过配置文件调整：
-- 死亡率参数
-- 繁殖参数
-- 资源生产参数
-- 狩猎风险
-- 初始人口比例
-
-查看 `simulation/config_registry.py` 了解详情。
-
-## 依赖安装
+## Installation / 安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-需要: numpy, matplotlib
+Required:
 
-## 作者
+- `numpy`
+- `matplotlib` (for plotting; simulation can still run without it)
 
-基于用户的进化论假设实现的计算机模拟验证。
+## Reproducibility Notes / 复现说明
+
+- Use multiple random seeds and compare distribution statistics, not only single runs.
+- Prefer reporting mean + median + quantiles for robustness.
+- Keep configuration snapshots for each experiment when preparing reports.
