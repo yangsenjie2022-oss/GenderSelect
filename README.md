@@ -2,6 +2,10 @@
 
 探究人群在资源压力下的分工、繁殖与竞争的进化模拟（能力驱动版本）。
 
+## About
+
+GenderSelect is a Python simulation project for researching sex-selection patterns and why a "male slightly stronger than female" phenotype may emerge under long-term ecological and social pressures.
+
 ## 核心问题
 
 本模拟当前版本聚焦：
