@@ -1,0 +1,36 @@
+chapter:
+  volume: "第一卷：小术无国"
+  number: 1
+  working_title: ""
+  target_length_cn_chars: 3500
+
+function:
+  plot: ""
+  character_growth: ""
+  system_progress: ""
+  theme_progress: ""
+  cognition_stage: "" # 可填：小术、役棚、村社/里、铁炉、流民小邑、衡学、逐鹿
+  target_design: "" # 本章主角或他人设定的目标
+  feedback_or_cost: "" # 本章让谁承受反馈/代价
+  reader_inference: "" # 本章让读者自己推到什么，不直接讲什么
+  value_preference_audit: "" # 若本章有人说某事好/善/义/公，成本和收益如何归账
+
+required_elements:
+  characters: []
+  locations: []
+  objects: []
+  system_prompts: []
+  lines_or_motifs: []
+  bond_beats: [] # 本章推进哪条人物羁绊
+  inference_sources: [] # 本章理论/命名来自哪些前文经历、现代记忆或草蛇灰线
+  system_persona_stage: "" # 工具/回声/衡仪/独立；前期通常留空或工具
+
+constraints:
+  must_include: []
+  must_avoid:
+    - "女主暧昧"
+    - "现代政治口号"
+    - "系统发奖励"
+    - "主角突然全知"
+
+ending_hook: ""
