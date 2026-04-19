@@ -53,6 +53,12 @@ Important note:
 # 1) Run with finite months / 有限月数运行
 python main.py --preset default --months 1200
 
+# 1.1) Daily tick mode / 以天为tick运行
+python main.py --preset default --months 12 --time-unit day
+
+# 1.2) Parallel tribe-local phases / 按部落并行执行可并行阶段
+python main.py --preset default --months 1200 --parallel --max-workers 4
+
 # 2) Long-running interactive mode / 持续运行（直到 stop）
 python main.py --months -1 --report-interval 12 --run-name exp_live_01
 
@@ -87,17 +93,40 @@ Main tracked outputs include:
 
 ```text
 simulation/
+  core/
+    events.py        # Domain events emitted by systems
+    time.py          # Monthly/daily StepContext
+    execution.py     # Sequential/threaded tribe executor
+    scheduler.py     # Day-based system scheduler skeleton
   container.py
   models.py
   mechanisms.py
+  metrics.py          # Role exposure, rate, and selection metric builders
   simulator.py
   visualization.py
   config_registry.py
   csv_exporter.py
+  reproduction.py     # Mate pool, mate selection, conception, pregnancy, inheritance
 
 main.py
 run.py
 ```
+
+## Architecture Direction / 架构方向
+
+The current engine now has a small core layer:
+
+- `StepContext` makes each tick explicit: one month by default, or one day with `--time-unit day`.
+- Per-tribe phases can run through `ParallelTribeExecutor`; threading is opt-in to keep old experiments reproducible by default.
+- Mechanisms accept optional `time_step_days` and `days_per_month`, so monthly rates can be scaled when the engine runs daily ticks.
+- `SimulationScheduler` and `DomainEvent` are the low-coupling foundation for future work: reproduction, mortality, activity assignment, and metrics can be split into smaller systems without changing the engine loop every time.
+- `ReproductionMechanism` now delegates to composable policies in `simulation/reproduction.py`: mate-pool collection, weighted or strict-random mate selection, conception, pregnancy advancement, parent resolution, inheritance, and selection statistics.
+- `SimulationMetrics` owns role exposure, birth/death rate, and selection-stage metric construction, reducing metric logic inside `EvolutionSimulator`.
+
+Recommended next refactor targets:
+
+- Split activity assignment into eligibility rules and assignment policies.
+- Move metrics collection from state polling into event observers.
 
 ## Installation / 安装
 

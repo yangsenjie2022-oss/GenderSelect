@@ -9,12 +9,14 @@ import os
 from datetime import datetime
 
 from .models import Tribe, Individual, GenderStrengthRelation, Gender
+from .metrics import SimulationMetrics
 from .mechanisms import (
     BaseMechanism, ActivityAssignmentMechanism, ResourceProductionMechanism,
     MortalityMechanism, ReproductionMechanism, ResourceDistributionMechanism,
-    CompetitionMechanism, AgingMechanism, PhenotypeAdaptationMechanism
+    CompetitionMechanism, BeastAttackMechanism, AgingMechanism, PhenotypeAdaptationMechanism
 )
 from .container import DIContainer
+from .core import ExecutionConfig, ParallelTribeExecutor, StepContext, TimeUnit
 
 
 @dataclass
@@ -23,6 +25,14 @@ class SimulationConfig:
     # 人口参数
     initial_population: int = 50
     max_simulation_months: int = 1200  # 100年
+
+    # 时间粒度：month 保持旧行为；day 使用日步长，并在月边界运行月度统计/输出
+    time_unit: str = "month"
+    days_per_month: int = 30
+
+    # 并行执行：默认关闭，保持随机序列与旧结果更接近
+    parallel_enabled: bool = False
+    max_workers: Optional[int] = None
     
     # K值（环境承载力）
     base_k: float = 200
@@ -47,6 +57,7 @@ class SimulationConfig:
 class SimulationState:
     """模拟状态（可序列化）"""
     month: int = 0
+    day: int = 0
     tribes: Dict[int, Tribe] = field(default_factory=dict)
     individual_id_counter: int = 0
     next_tribe_id: int = 0
@@ -55,6 +66,7 @@ class SimulationState:
     def __getstate__(self):
         return {
             'month': self.month,
+            'day': self.day,
             'tribes': {k: v.to_dict() for k, v in self.tribes.items()},
             'individual_id_counter': self.individual_id_counter,
             'next_tribe_id': self.next_tribe_id,
@@ -63,6 +75,7 @@ class SimulationState:
     
     def __setstate__(self, state):
         self.month = state['month']
+        self.day = state.get('day', self.month * 30)
         self.tribes = {int(k): Tribe.from_dict(v) for k, v in state['tribes'].items()}
         self.individual_id_counter = state['individual_id_counter']
         self.next_tribe_id = state.get('next_tribe_id', (max(self.tribes.keys()) + 1 if self.tribes else 0))
@@ -85,13 +98,46 @@ class EvolutionSimulator:
         self.distribution_mechanism: ResourceDistributionMechanism = None
         self.adaptation_mechanism: PhenotypeAdaptationMechanism = None
         self.competition_mechanism: CompetitionMechanism = None
+        self.beast_attack_mechanism: BeastAttackMechanism = None
         self.aging_mechanism: AgingMechanism = None
         
         # 事件回调
         self.event_callbacks: List[Callable[[str, Dict], None]] = []
+        self.tribe_executor: ParallelTribeExecutor = ParallelTribeExecutor()
+        self.metrics = SimulationMetrics()
         
         self._resolve_dependencies()
+        self._refresh_execution()
         self.initial_tribe_count: int = 0
+
+    def _refresh_execution(self) -> None:
+        """Refresh execution services from the current config."""
+        if self.config is None:
+            self.tribe_executor = ParallelTribeExecutor()
+            return
+        self.tribe_executor = ParallelTribeExecutor(
+            ExecutionConfig(
+                parallel_enabled=bool(getattr(self.config, 'parallel_enabled', False)),
+                max_workers=getattr(self.config, 'max_workers', None)
+            )
+        )
+
+    def _time_unit(self) -> TimeUnit:
+        raw = str(getattr(self.config, 'time_unit', 'month')).lower()
+        return TimeUnit.DAY if raw == TimeUnit.DAY.value else TimeUnit.MONTH
+
+    def _make_step_context(self, step_days: int) -> StepContext:
+        return StepContext(
+            day=self.state.day,
+            month=self.state.month,
+            step_days=step_days,
+            days_per_month=max(1, int(getattr(self.config, 'days_per_month', 30))),
+            time_unit=self._time_unit()
+        )
+
+    def _apply_to_tribes(self, func: Callable[[Tribe], Any]) -> List[Any]:
+        """Run independent tribe-local work through the configured executor."""
+        return self.tribe_executor.map(list(self.state.tribes.values()), func)
     
     def _resolve_dependencies(self):
         """解析依赖"""
@@ -130,6 +176,11 @@ class EvolutionSimulator:
             self.competition_mechanism = self.container.resolve('competition_mechanism')
         except:
             self.competition_mechanism = CompetitionMechanism()
+
+        try:
+            self.beast_attack_mechanism = self.container.resolve('beast_attack_mechanism')
+        except:
+            self.beast_attack_mechanism = BeastAttackMechanism()
         
         try:
             self.aging_mechanism = self.container.resolve('aging_mechanism')
@@ -141,11 +192,13 @@ class EvolutionSimulator:
             self.config = self.container.resolve('simulation_config')
         except:
             self.config = SimulationConfig()
+        self._refresh_execution()
     
     def initialize(self, config: Optional[SimulationConfig] = None):
         """初始化模拟"""
         if config:
             self.config = config
+            self._refresh_execution()
         
         self.state = SimulationState()
         self.initial_tribe_count = self.config.tribe_count
@@ -200,12 +253,32 @@ class EvolutionSimulator:
         """初始化部落资源"""
         tribe.food_meat = 100
         tribe.food_plant = 100
+        tribe.tool_material = 25
+        tribe.stone_tools = 20
         tribe.total_resources = 200
 
     def step(self) -> Dict:
-        """执行一步模拟（一个月）"""
-        self.state.month += 1
+        """执行一步模拟：默认月步长；time_unit=day 时为日步长。"""
+        if self._time_unit() == TimeUnit.DAY:
+            return self._step_daily()
+        return self._step_tick(
+            step_days=max(1, int(getattr(self.config, 'days_per_month', 30))),
+            advance_month=True
+        )
+
+    def _step_daily(self) -> Dict:
+        """执行一步日粒度模拟。"""
+        days_per_month = max(1, int(getattr(self.config, 'days_per_month', 30)))
+        advance_month = (self.state.day + 1) % days_per_month == 0
+        return self._step_tick(step_days=1, advance_month=advance_month)
+
+    def _step_tick(self, step_days: int, advance_month: bool) -> Dict:
+        """执行一个调度 tick，可代表一个月或一天。"""
+        self.state.day += max(1, int(step_days))
+        if advance_month:
+            self.state.month += 1
         current_month = self.state.month
+        context = self._make_step_context(max(1, int(step_days)))
 
         # 记录月初人口，用于计算当月出生率/死亡率
         month_start = {
@@ -220,6 +293,8 @@ class EvolutionSimulator:
         # 记录本月事件
         monthly_events = {
             'month': current_month,
+            'day': self.state.day,
+            'time_unit': context.time_unit.value,
             'births': {k: 0 for k in self.state.tribes.keys()},
             'births_male': {k: 0 for k in self.state.tribes.keys()},
             'births_female': {k: 0 for k in self.state.tribes.keys()},
@@ -229,9 +304,11 @@ class EvolutionSimulator:
             'birth_rates': {},
             'death_rates': {},
             'selection_metrics': {},
+            'role_exposure': {},
             'shared_k': 0.0,
             'injured': {k: 0 for k in self.state.tribes.keys()},
-            'competitions': []
+            'competitions': [],
+            'beast_attacks': {}
         }
 
         # 每月计算共享承载力（S曲线K）
@@ -240,20 +317,38 @@ class EvolutionSimulator:
         total_population = sum(t.population for t in self.state.tribes.values())
         
         # 1. 活动分配
-        for tribe in self.state.tribes.values():
-            self.activity_mechanism.apply(tribe)
+        self._apply_to_tribes(lambda tribe: self.activity_mechanism.apply(tribe))
+
+        # 1.5 记录按性别的狩猎/采集暴露（用于验证分工是否由规则涌现）
+        for tid, tribe in self.state.tribes.items():
+            monthly_events['role_exposure'][tid] = self.metrics.build_role_exposure(tribe)
         
         # 2. 资源生产
-        for tribe in self.state.tribes.values():
-            self.production_mechanism.apply(tribe)
+        self._apply_to_tribes(
+            lambda tribe: self.production_mechanism.apply(
+                tribe,
+                time_step_days=context.step_days,
+                days_per_month=context.days_per_month
+            )
+        )
         
         # 3. 资源分配
-        for tribe in self.state.tribes.values():
-            self.distribution_mechanism.apply(tribe)
+        self._apply_to_tribes(
+            lambda tribe: self.distribution_mechanism.apply(
+                tribe,
+                time_step_days=context.step_days,
+                days_per_month=context.days_per_month
+            )
+        )
 
         # 3.5 表现型可塑（后天训练）
-        for tribe in self.state.tribes.values():
-            self.adaptation_mechanism.apply(tribe)
+        self._apply_to_tribes(
+            lambda tribe: self.adaptation_mechanism.apply(
+                tribe,
+                time_step_days=context.step_days,
+                days_per_month=context.days_per_month
+            )
+        )
         
         # 4. 繁殖
         reproduction_stats_by_tribe = {}
@@ -264,7 +359,9 @@ class EvolutionSimulator:
                     self.state.individual_id_counter,
                     list(self.state.tribes.values()),
                     shared_k=shared_k,
-                    total_population=total_population
+                    total_population=total_population,
+                    time_step_days=context.step_days,
+                    days_per_month=context.days_per_month
                 )
             reproduction_stats_by_tribe[tribe.id] = reproduction_stats
             for newborn in newborns:
@@ -274,12 +371,26 @@ class EvolutionSimulator:
             monthly_events['births_female'][tribe.id] = sum(1 for n in newborns if n.gender == Gender.FEMALE)
         
         # 5. 老化
-        for tribe in self.state.tribes.values():
-            self.aging_mechanism.apply(tribe)
+        self._apply_to_tribes(
+            lambda tribe: self.aging_mechanism.apply(
+                tribe,
+                time_step_days=context.step_days,
+                days_per_month=context.days_per_month
+            )
+        )
         
         # 6. 死亡
-        for tribe in self.state.tribes.values():
-            deceased = self.mortality_mechanism.apply(tribe)
+        mortality_results = self._apply_to_tribes(
+            lambda tribe: (
+                tribe,
+                self.mortality_mechanism.apply(
+                    tribe,
+                    time_step_days=context.step_days,
+                    days_per_month=context.days_per_month
+                )
+            )
+        )
+        for tribe, deceased in mortality_results:
             monthly_events['deaths'][tribe.id] = len(deceased)
             monthly_events['deaths_male'][tribe.id] = sum(1 for d in deceased if d.gender == Gender.MALE)
             monthly_events['deaths_female'][tribe.id] = sum(1 for d in deceased if d.gender == Gender.FEMALE)
@@ -290,7 +401,9 @@ class EvolutionSimulator:
         for tribe in self.state.tribes.values():
             crowded_deaths = self.mortality_mechanism.apply_crowding_pressure(
                 tribe,
-                overcrowd_ratio
+                overcrowd_ratio,
+                time_step_days=context.step_days,
+                days_per_month=context.days_per_month
             )
             if crowded_deaths:
                 monthly_events['deaths'][tribe.id] += len(crowded_deaths)
@@ -298,7 +411,7 @@ class EvolutionSimulator:
                 monthly_events['deaths_female'][tribe.id] += sum(1 for d in crowded_deaths if d.gender == Gender.FEMALE)
 
         # 7. 部落间竞争（每3个月一次）
-        if current_month % 3 == 0:
+        if context.is_month_boundary and current_month > 0 and current_month % 3 == 0:
             current_k = self._calculate_dynamic_k()
             competition_results = self.competition_mechanism.apply(
                 list(self.state.tribes.values()), current_k
@@ -315,25 +428,29 @@ class EvolutionSimulator:
                 monthly_events['injured'][tid1] += res.get('tribe1_injuries', 0)
                 monthly_events['injured'][tid2] += res.get('tribe2_injuries', 0)
 
+        # 7.2 野兽攻击（每月判定）
+        beast_results = self.beast_attack_mechanism.apply(
+            list(self.state.tribes.values()),
+            shared_k,
+            time_step_days=context.step_days,
+            days_per_month=context.days_per_month
+        )
+        monthly_events['beast_attacks'] = beast_results
+        for tid, res in beast_results.items():
+            monthly_events['deaths'][tid] += res.get('deaths', 0)
+            monthly_events['deaths_male'][tid] += res.get('male_deaths', 0)
+            monthly_events['deaths_female'][tid] += res.get('female_deaths', 0)
+            monthly_events['injured'][tid] += res.get('injuries', 0)
+
         # 7.8 低外敌压力下的大部落分裂
-        self._apply_tribe_splitting()
+        if context.is_month_boundary:
+            self._apply_tribe_splitting()
 
         # 7.5 计算出生率/死亡率（总人口与分性别，含战争伤亡）
         for tid, start in month_start.items():
-            start_pop = max(1, start['population'])
-            start_male = max(1, start['male_count'])
-            start_female = max(1, start['female_count'])
-
-            monthly_events['birth_rates'][tid] = {
-                'total': monthly_events['births'][tid] / start_pop,
-                'male': monthly_events['births_male'][tid] / start_male,
-                'female': monthly_events['births_female'][tid] / start_female
-            }
-            monthly_events['death_rates'][tid] = {
-                'total': monthly_events['deaths'][tid] / start_pop,
-                'male': monthly_events['deaths_male'][tid] / start_male,
-                'female': monthly_events['deaths_female'][tid] / start_female
-            }
+            rates = self.metrics.build_birth_death_rates(month_start, monthly_events, tid)
+            monthly_events['birth_rates'][tid] = rates['birth']
+            monthly_events['death_rates'][tid] = rates['death']
 
         # 7.6 三阶段选择指标（配偶选择 -> 受孕出生 -> 子代存活代理）
         for tid, tribe in self.state.tribes.items():
@@ -352,7 +469,7 @@ class EvolutionSimulator:
         self.state.history.append(snapshot)
         
         # 检查是否需要保存检查点
-        if current_month % self.config.checkpoint_interval == 0:
+        if context.is_month_boundary and current_month > 0 and current_month % self.config.checkpoint_interval == 0:
             self.save_checkpoint()
         
         self._emit_event('step_completed', monthly_events)
@@ -361,63 +478,7 @@ class EvolutionSimulator:
 
     def _build_selection_metrics(self, tribe: Tribe, reproduction_stats: Dict) -> Dict:
         """构建三阶段选择指标，尽量少先验地回放选择结果"""
-        eligible = float(reproduction_stats.get('eligible_males_count', 0))
-        choice_events = float(reproduction_stats.get('female_choice_events', 0))
-        selected_unique = float(reproduction_stats.get('selected_males_count', 0))
-        conception_events = float(reproduction_stats.get('conception_events', 0))
-
-        # 子代存活代理：过去5岁队列中存活占比 + 父代特征与子代存活率相关性
-        child_pool = [ind for ind in tribe.individuals.values() if ind.age <= 5]
-        alive_children = [ind for ind in child_pool if ind.is_alive]
-        child_survival_5y = (len(alive_children) / len(child_pool)) if child_pool else 0.0
-
-        father_samples = []
-        for ind in tribe.individuals.values():
-            if ind.gender != Gender.MALE or len(ind.children) == 0:
-                continue
-            kids = [tribe.individuals[cid] for cid in ind.children if cid in tribe.individuals]
-            if not kids:
-                continue
-            alive_ratio = sum(1 for k in kids if k.is_alive) / len(kids)
-            father_samples.append({
-                'resource': float(ind.resources),
-                'effective_strength': float(ind.effective_strength),
-                'effective_intelligence': float(ind.effective_intelligence),
-                'effective_communication': float(ind.effective_communication),
-                'alive_ratio': float(alive_ratio)
-            })
-
-        corr = {
-            'resource': 0.0,
-            'effective_strength': 0.0,
-            'effective_intelligence': 0.0,
-            'effective_communication': 0.0
-        }
-        if len(father_samples) >= 3:
-            y = np.array([s['alive_ratio'] for s in father_samples], dtype=float)
-            if float(np.std(y)) > 1e-9:
-                for k in corr.keys():
-                    x = np.array([s[k] for s in father_samples], dtype=float)
-                    corr[k] = float(np.corrcoef(x, y)[0, 1]) if float(np.std(x)) > 1e-9 else 0.0
-
-        return {
-            'mating_stage': {
-                'eligible_males': int(eligible),
-                'female_choice_events': int(choice_events),
-                'selected_unique_males': int(selected_unique),
-                'selected_unique_rate': (selected_unique / eligible) if eligible > 0 else 0.0,
-                'mate_selection_differential': reproduction_stats.get('mate_selection_differential', {})
-            },
-            'birth_stage': {
-                'conception_events': int(conception_events),
-                'conception_per_choice': (conception_events / choice_events) if choice_events > 0 else 0.0,
-                'birth_selection_differential': reproduction_stats.get('birth_selection_differential', {})
-            },
-            'offspring_survival_stage': {
-                'child_survival_5y': float(child_survival_5y),
-                'father_trait_alive_child_corr': corr
-            }
-        }
+        return self.metrics.build_selection_metrics(tribe, reproduction_stats)
     
     def run(self, months: Optional[int] = None) -> SimulationState:
         """运行模拟"""
@@ -579,12 +640,18 @@ class EvolutionSimulator:
             # 资源对半分
             transfer_meat = tribe.food_meat * 0.5
             transfer_plant = tribe.food_plant * 0.5
+            transfer_tool_material = tribe.tool_material * 0.5
+            transfer_stone_tools = tribe.stone_tools * 0.5
             tribe.food_meat -= transfer_meat
             tribe.food_plant -= transfer_plant
+            tribe.tool_material -= transfer_tool_material
+            tribe.stone_tools -= transfer_stone_tools
             tribe.total_resources = tribe.food_meat + tribe.food_plant
 
             new_tribe.food_meat = transfer_meat
             new_tribe.food_plant = transfer_plant
+            new_tribe.tool_material = transfer_tool_material
+            new_tribe.stone_tools = transfer_stone_tools
             new_tribe.total_resources = transfer_meat + transfer_plant
 
             new_tribes[next_tid] = new_tribe
@@ -597,6 +664,7 @@ class EvolutionSimulator:
         """创建当前状态快照"""
         snapshot = {
             'month': self.state.month,
+            'day': self.state.day,
             'tribes': {}
         }
         
@@ -620,8 +688,11 @@ class EvolutionSimulator:
                 'injured_count': tribe.injured_count,
                 'hunters': len(tribe.hunters),
                 'gatherers': len(tribe.gatherers),
+                'crafters': len(tribe.crafters),
                 'resources': tribe.total_resources,
                 'food_meat': tribe.food_meat,
+                'tool_material': tribe.tool_material,
+                'stone_tools': tribe.stone_tools,
                 'productive_capacity': tribe.productive_capacity,
                 'violence_capacity': tribe.violence_capacity
             }
@@ -638,7 +709,7 @@ class EvolutionSimulator:
                 f"雌均力(后天/先天)={tribe.avg_female_strength:.3f}/{tribe.avg_female_innate_strength:.3f}, "
                 f"力表达(雄/雌)={tribe.avg_male_strength_expression:.3f}/{tribe.avg_female_strength_expression:.3f}, "
                 f"雌择偶偏好主导={tribe.dominant_female_mate_preference}, "
-                f"受伤={tribe.injured_count}, 资源={tribe.total_resources:.1f}"
+                f"受伤={tribe.injured_count}, 资源={tribe.total_resources:.1f}, 石器={tribe.stone_tools:.1f}"
             )
     
     def _print_final_stats(self):
@@ -723,6 +794,14 @@ class EvolutionSimulator:
                     values.append(stage_map[metric_key])
             return float(np.mean(values)) if values else 0.0
 
+        def _avg_role_exposure(tid: int, key: str) -> float:
+            values = []
+            for h in self.state.history:
+                role_map = h.get('role_exposure', {})
+                if tid in role_map:
+                    values.append(role_map[tid].get(key, 0.0))
+            return float(np.mean(values)) if values else 0.0
+
         return {
             'final_month': self.state.month,
             'population_structure': self.config.population_structure,
@@ -753,6 +832,14 @@ class EvolutionSimulator:
                     'avg_selected_unique_male_rate': _avg_selection_metric(tid, 'mating_stage', 'selected_unique_rate'),
                     'avg_conception_per_choice': _avg_selection_metric(tid, 'birth_stage', 'conception_per_choice'),
                     'avg_child_survival_5y': _avg_selection_metric(tid, 'offspring_survival_stage', 'child_survival_5y'),
+                    'avg_male_hunter_ratio': _avg_role_exposure(tid, 'male_hunter_ratio'),
+                    'avg_female_hunter_ratio': _avg_role_exposure(tid, 'female_hunter_ratio'),
+                    'avg_male_gatherer_ratio': _avg_role_exposure(tid, 'male_gatherer_ratio'),
+                    'avg_female_gatherer_ratio': _avg_role_exposure(tid, 'female_gatherer_ratio'),
+                    'avg_male_crafter_ratio': _avg_role_exposure(tid, 'male_crafter_ratio'),
+                    'avg_female_crafter_ratio': _avg_role_exposure(tid, 'female_crafter_ratio'),
+                    'final_tool_material': tribe.tool_material,
+                    'final_stone_tools': tribe.stone_tools,
                     'population_history': tribe.population_history,
                     'resource_history': tribe.resource_history
                 }

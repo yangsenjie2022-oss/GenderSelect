@@ -8,6 +8,7 @@ import argparse
 import csv
 import sys
 import threading
+import time
 from queue import Queue, Empty
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from simulation.simulator import EvolutionSimulator, SimulationConfig
 from simulation.mechanisms import (
     ActivityAssignmentMechanism, ResourceProductionMechanism,
     MortalityMechanism, ReproductionMechanism, ResourceDistributionMechanism,
-    CompetitionMechanism, AgingMechanism, PhenotypeAdaptationMechanism
+    CompetitionMechanism, BeastAttackMechanism, AgingMechanism, PhenotypeAdaptationMechanism
 )
 from simulation.config_registry import ConfigRegistry
 
@@ -53,13 +54,16 @@ def _try_parse_value(text: str):
 def _append_monthly_csv(simulator: EvolutionSimulator, events: dict, csv_path: Path):
     """按月写 CSV（每部落一行）"""
     fields = [
-        'month', 'tribe_id', 'population', 'male_count', 'female_count',
+        'month', 'day', 'time_unit', 'tribe_id', 'population', 'male_count', 'female_count',
         'births', 'deaths', 'birth_rate_total', 'death_rate_total',
         'avg_male_strength', 'avg_female_strength',
         'avg_male_innate_strength', 'avg_female_innate_strength',
         'avg_male_strength_expression', 'avg_female_strength_expression',
+        'male_hunter_ratio', 'female_hunter_ratio',
+        'male_gatherer_ratio', 'female_gatherer_ratio',
+        'male_crafter_ratio', 'female_crafter_ratio',
         'selected_unique_male_rate', 'conception_per_choice', 'child_survival_5y',
-        'resources', 'injured_count'
+        'resources', 'tool_material', 'stone_tools', 'injured_count'
     ]
     is_new = not csv_path.exists()
     with open(csv_path, 'a', newline='', encoding='utf-8') as f:
@@ -70,9 +74,12 @@ def _append_monthly_csv(simulator: EvolutionSimulator, events: dict, csv_path: P
         for tid, tribe in simulator.state.tribes.items():
             rate_b = events.get('birth_rates', {}).get(tid, {})
             rate_d = events.get('death_rates', {}).get(tid, {})
+            role = events.get('role_exposure', {}).get(tid, {})
             sel = events.get('selection_metrics', {}).get(tid, {})
             writer.writerow({
                 'month': month,
+                'day': events.get('day', getattr(simulator.state, 'day', month * 30)),
+                'time_unit': events.get('time_unit', getattr(simulator.config, 'time_unit', 'month')),
                 'tribe_id': tid,
                 'population': tribe.population,
                 'male_count': tribe.male_count,
@@ -87,10 +94,18 @@ def _append_monthly_csv(simulator: EvolutionSimulator, events: dict, csv_path: P
                 'avg_female_innate_strength': tribe.avg_female_innate_strength,
                 'avg_male_strength_expression': tribe.avg_male_strength_expression,
                 'avg_female_strength_expression': tribe.avg_female_strength_expression,
+                'male_hunter_ratio': role.get('male_hunter_ratio', 0.0),
+                'female_hunter_ratio': role.get('female_hunter_ratio', 0.0),
+                'male_gatherer_ratio': role.get('male_gatherer_ratio', 0.0),
+                'female_gatherer_ratio': role.get('female_gatherer_ratio', 0.0),
+                'male_crafter_ratio': role.get('male_crafter_ratio', 0.0),
+                'female_crafter_ratio': role.get('female_crafter_ratio', 0.0),
                 'selected_unique_male_rate': sel.get('mating_stage', {}).get('selected_unique_rate', 0.0),
                 'conception_per_choice': sel.get('birth_stage', {}).get('conception_per_choice', 0.0),
                 'child_survival_5y': sel.get('offspring_survival_stage', {}).get('child_survival_5y', 0.0),
                 'resources': tribe.total_resources,
+                'tool_material': tribe.tool_material,
+                'stone_tools': tribe.stone_tools,
                 'injured_count': tribe.injured_count
             })
 
@@ -116,6 +131,10 @@ def _set_runtime_parameter(simulator: EvolutionSimulator, key: str, value_text: 
         runtime_state['report_interval'] = max(1, int(value))
         print(f"[runtime] report_interval = {runtime_state['report_interval']}")
         return True
+    if key == 'runtime.paused':
+        runtime_state['paused'] = bool(value)
+        print(f"[runtime] paused = {runtime_state['paused']}")
+        return True
 
     target_map = {
         'config': simulator.config,
@@ -125,7 +144,8 @@ def _set_runtime_parameter(simulator: EvolutionSimulator, key: str, value_text: 
         'reproduction': simulator.reproduction_mechanism,
         'distribution': simulator.distribution_mechanism,
         'adaptation': simulator.adaptation_mechanism,
-        'competition': simulator.competition_mechanism
+        'competition': simulator.competition_mechanism,
+        'beast': simulator.beast_attack_mechanism
     }
     if '.' not in key:
         print("参数格式错误，应为 scope.attr，例如 mortality.base_mortality")
@@ -141,6 +161,33 @@ def _set_runtime_parameter(simulator: EvolutionSimulator, key: str, value_text: 
     setattr(obj, attr, value)
     print(f"[runtime] {scope}.{attr} = {value}")
     return True
+
+
+def _apply_runtime_strategy(simulator: EvolutionSimulator, preset_name: str):
+    """运行时应用某个预设策略（只覆盖机制/配置中已有字段）"""
+    if preset_name not in ConfigRegistry.get_preset_names():
+        raise ValueError(f"未知预设: {preset_name}")
+    cfg = ConfigRegistry.get_mechanism_configs(preset_name)
+    mech_map = {
+        'activity': simulator.activity_mechanism,
+        'production': simulator.production_mechanism,
+        'mortality': simulator.mortality_mechanism,
+        'reproduction': simulator.reproduction_mechanism,
+        'distribution': simulator.distribution_mechanism,
+        'adaptation': simulator.adaptation_mechanism,
+        'competition': simulator.competition_mechanism,
+        'beast': simulator.beast_attack_mechanism,
+    }
+    updated = 0
+    for scope, params in cfg.items():
+        obj = mech_map.get(scope)
+        if obj is None:
+            continue
+        for k, v in params.items():
+            if hasattr(obj, k):
+                setattr(obj, k, v)
+                updated += 1
+    print(f"[runtime] 已应用策略: {preset_name}, 更新参数数={updated}")
 
 
 def _start_command_listener(cmd_queue: Queue, stop_flag: dict):
@@ -169,12 +216,20 @@ def _process_commands(simulator: EvolutionSimulator, cmd_queue: Queue, runtime_s
         if op in ('stop', 'quit', 'exit'):
             stop_flag['stop'] = True
             print("收到停止命令，将在当前月结束后退出。")
+        elif op in ('p', 'pause'):
+            runtime_state['paused'] = True
+            print("已暂停。可输入 set/strategy/status/report/plots/checkpoint，输入 resume 继续。")
+        elif op in ('r', 'resume'):
+            runtime_state['paused'] = False
+            print("继续运行。")
         elif op == 'help':
-            print("命令: help | status | report | stop | checkpoint | set <scope.attr> <value> | plots")
+            print("命令: help | p(pause) | r(resume) | status | report | stop | checkpoint | plots")
+            print("      set <scope.attr> <value> | strategy <preset_name>")
             print("示例: set mortality.base_mortality 0.0015")
             print("示例: set runtime.report_interval 12")
+            print("示例: strategy ablation_symmetric_hunt_risk")
         elif op == 'status':
-            print(f"月份={simulator.state.month}, 部落数={len(simulator.state.tribes)}")
+            print(f"月份={simulator.state.month}, 部落数={len(simulator.state.tribes)}, paused={runtime_state.get('paused', False)}")
         elif op == 'report':
             simulator._print_progress()
         elif op == 'checkpoint':
@@ -183,6 +238,12 @@ def _process_commands(simulator: EvolutionSimulator, cmd_queue: Queue, runtime_s
             key = parts[1]
             value_text = " ".join(parts[2:])
             _set_runtime_parameter(simulator, key, value_text, runtime_state)
+        elif op == 'strategy' and len(parts) >= 2:
+            preset_name = parts[1]
+            try:
+                _apply_runtime_strategy(simulator, preset_name)
+            except Exception as e:
+                print(f"策略应用失败: {e}")
         elif op == 'plots':
             try:
                 from simulation.visualization import SimulationVisualizer
@@ -244,6 +305,12 @@ def setup_container(preset_name: str = 'default') -> DIContainer:
         'competition_mechanism',
         CompetitionMechanism(**mech_configs['competition'])
     )
+
+    beast_cfg = mech_configs.get('beast', {})
+    container.register_instance(
+        'beast_attack_mechanism',
+        BeastAttackMechanism(**beast_cfg)
+    )
     
     container.register_instance(
         'aging_mechanism',
@@ -260,7 +327,12 @@ def run_simulation(
     output_dir: str = './output',
     run_name: str = None,
     report_interval: int = 12,
-    csv_enabled: bool = True
+    csv_enabled: bool = True,
+    live_control: bool = False,
+    time_unit: str = None,
+    days_per_month: int = None,
+    parallel_enabled: bool = None,
+    max_workers: int = None
 ) -> EvolutionSimulator:
     """
     运行模拟
@@ -281,6 +353,20 @@ def run_simulation(
     
     # 2. 创建模拟器
     simulator = EvolutionSimulator(container)
+
+    def _apply_engine_runtime_config():
+        # 运行级框架配置（不改变预设文件本身）
+        if time_unit is not None:
+            simulator.config.time_unit = time_unit
+        if days_per_month is not None:
+            simulator.config.days_per_month = max(1, int(days_per_month))
+        if parallel_enabled is not None:
+            simulator.config.parallel_enabled = bool(parallel_enabled)
+        if max_workers is not None:
+            simulator.config.max_workers = max(1, int(max_workers))
+        simulator._refresh_execution()
+
+    _apply_engine_runtime_config()
     
     # 3. 加载检查点或初始化
     if checkpoint:
@@ -296,6 +382,7 @@ def run_simulation(
         
         if checkpoint:
             simulator.load_checkpoint(checkpoint)
+            _apply_engine_runtime_config()
     
     if not checkpoint:
         simulator.initialize()
@@ -309,13 +396,13 @@ def run_simulation(
 
     # 5. 运行模拟（months < 0 表示持续运行，直到 stop 命令）
     target_months = simulator.config.max_simulation_months if months is None else months
-    interactive = target_months < 0
-    runtime_state = {'report_interval': max(1, report_interval)}
+    interactive = (target_months < 0) or live_control
+    runtime_state = {'report_interval': max(1, report_interval), 'paused': False}
     stop_flag = {'stop': False}
     cmd_queue: Queue = Queue()
 
     if interactive:
-        print("\n进入持续运行模式（输入 help 查看命令，输入 stop 停止）")
+        print("\n进入运行时控制模式（输入 help 查看命令，输入 p 暂停，stop 停止）")
         listener_thread = threading.Thread(
             target=_start_command_listener,
             args=(cmd_queue, stop_flag),
@@ -324,21 +411,38 @@ def run_simulation(
         listener_thread.start()
 
     while True:
+        if interactive:
+            _process_commands(simulator, cmd_queue, runtime_state, stop_flag, run_dir)
+            if stop_flag['stop']:
+                break
+            if runtime_state.get('paused', False):
+                time.sleep(0.15)
+                continue
+
         events = simulator.step()
         _remove_extinct_tribes(simulator)
 
         if csv_enabled:
             _append_monthly_csv(simulator, events, csv_path)
 
-        if simulator.state.month % runtime_state['report_interval'] == 0:
+        if getattr(simulator.config, 'time_unit', 'month') == 'day':
+            report_due = (
+                simulator.state.day > 0 and
+                simulator.state.day % (
+                    runtime_state['report_interval'] * max(1, getattr(simulator.config, 'days_per_month', 30))
+                ) == 0
+            )
+        else:
+            report_due = simulator.state.month % runtime_state['report_interval'] == 0
+
+        if report_due:
             simulator._print_progress()
 
-        if interactive:
-            _process_commands(simulator, cmd_queue, runtime_state, stop_flag, run_dir)
-            if stop_flag['stop']:
+        if not interactive:
+            if simulator.state.month >= target_months:
                 break
         else:
-            if simulator.state.month >= target_months:
+            if target_months >= 0 and simulator.state.month >= target_months:
                 break
 
     print(f"模拟结束，月份: {simulator.state.month}")
@@ -441,6 +545,23 @@ def analyze_results(simulator: EvolutionSimulator):
             f"{data.get('avg_conception_per_choice', 0.0):.3f} / "
             f"{data.get('avg_child_survival_5y', 0.0):.3f}"
         )
+        print(
+            f"   分工暴露(雄猎/雌猎/雄采/雌采): "
+            f"{data.get('avg_male_hunter_ratio', 0.0):.3f} / "
+            f"{data.get('avg_female_hunter_ratio', 0.0):.3f} / "
+            f"{data.get('avg_male_gatherer_ratio', 0.0):.3f} / "
+            f"{data.get('avg_female_gatherer_ratio', 0.0):.3f}"
+        )
+        print(
+            f"   工匠暴露(雄工/雌工): "
+            f"{data.get('avg_male_crafter_ratio', 0.0):.3f} / "
+            f"{data.get('avg_female_crafter_ratio', 0.0):.3f}"
+        )
+        print(
+            f"   工具库存(石料/石器): "
+            f"{data.get('final_tool_material', 0.0):.1f} / "
+            f"{data.get('final_stone_tools', 0.0):.1f}"
+        )
         print(f"   当前受伤: {injured}")
         print(f"   存活率: {survival:.1f}%")
         print()
@@ -459,7 +580,10 @@ def main():
   python main.py --list-presets           # 列出所有预设
   python main.py --checkpoint auto        # 从最新检查点继续
   python main.py --months 500             # 只运行500个月
+  python main.py --months 12 --time-unit day  # 以天为tick运行12个月
+  python main.py --parallel --max-workers 4   # 按部落并行执行可并行阶段
   python main.py --months -1              # 持续运行，直到输入 stop
+  python main.py --months 500 --live-control  # 有限月数 + 运行时命令控制
   python main.py --run-name exp_01        # 本次输出写入 output/exp_01/
         """
     )
@@ -480,6 +604,16 @@ def main():
                        help='进度报表间隔（月，默认: 12）')
     parser.add_argument('--no-csv', action='store_true',
                        help='禁用每月CSV写入')
+    parser.add_argument('--live-control', action='store_true',
+                       help='启用运行时命令控制（输入 p 暂停并注入命令）')
+    parser.add_argument('--time-unit', choices=['month', 'day'],
+                       help='模拟tick粒度：month=每步一月，day=每步一天')
+    parser.add_argument('--days-per-month', type=int,
+                       help='日粒度下每月天数（默认由配置决定，通常为30）')
+    parser.add_argument('--parallel', action='store_true',
+                       help='开启按部落并行执行可并行阶段')
+    parser.add_argument('--max-workers', type=int,
+                       help='并行worker数量')
     parser.add_argument('--analyze-only', '-a', type=str, metavar='CHECKPOINT',
                        help='只分析已有检查点，不运行模拟')
     
@@ -512,7 +646,12 @@ def main():
         output_dir=args.output,
         run_name=args.run_name,
         report_interval=args.report_interval,
-        csv_enabled=not args.no_csv
+        csv_enabled=not args.no_csv,
+        live_control=args.live_control,
+        time_unit=args.time_unit,
+        days_per_month=args.days_per_month,
+        parallel_enabled=args.parallel if args.parallel else None,
+        max_workers=args.max_workers
     )
     
     # 分析结果

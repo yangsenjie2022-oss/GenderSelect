@@ -17,6 +17,7 @@ class ActivityType(Enum):
     """活动类型"""
     HUNTING = auto()    # 狩猎
     GATHERING = auto()  # 采集
+    CRAFTING = auto()   # 工匠（打制/磨制石器）
 
 
 class GenderStrengthRelation(Enum):
@@ -46,8 +47,8 @@ class Individual:
     innate_strength: float = 1.0     # 先天体力（可遗传）
     innate_intelligence: float = 1.0 # 先天智力（可遗传）
     innate_communication: float = 1.0# 先天沟通（可遗传）
-    hunting_experience: float = 0.0  # 狩猎经验（后天，不遗传）
-    gathering_experience: float = 0.0# 采集经验（后天，不遗传）
+    # 可扩展技能经验：按职业/活动类型存储（后天，不遗传）
+    skills: Dict[str, float] = field(default_factory=dict)
     age: int = 0                     # 年龄
     
     # 生存状态
@@ -97,6 +98,24 @@ class Individual:
             self.mate_pref_intelligence = float(pref[2])
             self.mate_pref_communication = float(pref[3])
         self._normalize_mate_preferences()
+        self._ensure_skill_keys()
+
+    def _ensure_skill_keys(self):
+        """确保所有活动类型在技能表中有键"""
+        for act in ActivityType:
+            self.skills.setdefault(act.name, 0.0)
+
+    def get_skill(self, activity: ActivityType) -> float:
+        self._ensure_skill_keys()
+        return float(self.skills.get(activity.name, 0.0))
+
+    def add_skill(self, activity: ActivityType, delta: float) -> float:
+        self._ensure_skill_keys()
+        self.skills[activity.name] = max(0.0, float(self.skills.get(activity.name, 0.0) + delta))
+        return self.skills[activity.name]
+
+    def decay_skill(self, activity: ActivityType, delta: float) -> float:
+        return self.add_skill(activity, -abs(delta))
 
     def _normalize_mate_preferences(self):
         """归一化择偶偏好权重，确保四项非负且和为1"""
@@ -229,8 +248,7 @@ class Individual:
             'innate_strength': self.innate_strength,
             'innate_intelligence': self.innate_intelligence,
             'innate_communication': self.innate_communication,
-            'hunting_experience': self.hunting_experience,
-            'gathering_experience': self.gathering_experience,
+            'skills': self.skills,
             'age': self.age,
             'health': self.health,
             'resources': self.resources,
@@ -264,8 +282,11 @@ class Individual:
         ind.innate_strength = data.get('innate_strength', ind.strength)
         ind.innate_intelligence = data.get('innate_intelligence', ind.intelligence)
         ind.innate_communication = data.get('innate_communication', ind.communication)
-        ind.hunting_experience = data.get('hunting_experience', 0.0)
-        ind.gathering_experience = data.get('gathering_experience', 0.0)
+        ind.skills = {
+            str(k): float(v)
+            for k, v in data.get('skills', {}).items()
+        }
+        ind._ensure_skill_keys()
         ind.age = data['age']
         ind.health = data['health']
         ind.resources = data['resources']
@@ -290,6 +311,8 @@ class Tribe:
     total_resources: float = 0.0
     food_meat: float = 0.0        # 肉类资源（高蛋白/脂质）
     food_plant: float = 0.0       # 植物资源
+    tool_material: float = 0.0    # 石料等工具原料
+    stone_tools: float = 0.0      # 石器库存（可损耗）
     
     # 历史记录
     population_history: List[int] = field(default_factory=list)
@@ -329,6 +352,12 @@ class Tribe:
         """当前采集者列表"""
         return [ind for ind in self.individuals.values() 
                 if ind.is_alive and ind.assigned_activity == ActivityType.GATHERING]
+
+    @property
+    def crafters(self) -> List[Individual]:
+        """当前工匠列表"""
+        return [ind for ind in self.individuals.values()
+                if ind.is_alive and ind.assigned_activity == ActivityType.CRAFTING]
     
     @property
     def fertile_females(self) -> List[Individual]:
@@ -503,6 +532,8 @@ class Tribe:
             'total_resources': self.total_resources,
             'food_meat': self.food_meat,
             'food_plant': self.food_plant,
+            'tool_material': self.tool_material,
+            'stone_tools': self.stone_tools,
             'population_history': self.population_history,
             'resource_history': self.resource_history,
             'birth_count': self.birth_count,
@@ -521,6 +552,8 @@ class Tribe:
         tribe.total_resources = data['total_resources']
         tribe.food_meat = data['food_meat']
         tribe.food_plant = data['food_plant']
+        tribe.tool_material = data.get('tool_material', 0.0)
+        tribe.stone_tools = data.get('stone_tools', 0.0)
         tribe.population_history = data['population_history']
         tribe.resource_history = data['resource_history']
         tribe.birth_count = data['birth_count']

@@ -31,8 +31,246 @@ class ConfigRegistry:
                 'activity': {
                     'hunting_risk': 0.05,
                     'min_hunter_strength': 0.65,
+                    'min_hunter_intelligence': 0.9,
                     'protect_fertile_female': True,
-                    'hunter_ratio': 0.3
+                    'hunter_ratio': 0.3,
+                    'enable_crafting': False,
+                    'crafter_ratio': 0.08,
+                    'min_crafter_intelligence': 0.95
+                },
+                'production': {
+                    'meat_protein_content': 0.8,
+                    'plant_protein_content': 0.2,
+                    'hunting_base_yield': 18.0,
+                    'gathering_base_yield': 11.0,
+                    'tool_material_gather_base': 0.25,
+                    'tool_crafting_efficiency': 0.9,
+                    'tool_hunting_bonus_max': 0.2,
+                    'tool_gathering_bonus_max': 0.12,
+                    'tool_decay_rate': 0.03,
+                    'spoilage_rate': 0.08,
+                    'specialization_hunting_bonus': 0.09,
+                    'specialization_gathering_bonus': 0.08
+                },
+                'mortality': {
+                    'base_mortality': 0.001,
+                    'hunting_mortality': 0.008,
+                    'hunting_injury': 0.16,
+                    'pregnancy_mortality': 0.001,
+                    'infant_mortality': 0.01,
+                    'old_age_start': 65,
+                    'resource_threshold': 0.5,
+                    'injury_worsen_rate': 0.2,
+                    'injury_recover_rate': 0.3
+                },
+                'reproduction': {
+                    'gestation_months': 9,
+                    'fertility_cycle': 1,
+                    'min_resources_for_pregnancy': 1.0,
+                    'male_competition_factor': 0.3,
+                    'cross_tribe_mating_rate': 0.05
+                },
+                'distribution': {
+                    'base_consumption': 1.2,
+                    'pregnancy_extra': 0.8,
+                    'hunter_bonus': 0.15,
+                    'gatherer_bonus': 0.02,
+                    'crafter_bonus': 0.06,
+                    'child_priority': True
+                },
+                'adaptation': {
+                    'hunting_exp_gain': 0.14,
+                    'gathering_exp_gain': 0.12,
+                    'cross_decay': 0.04,
+                    'hunt_strength_gain': 0.006,
+                    'hunt_intelligence_gain': 0.003,
+                    'hunt_communication_gain': 0.003,
+                    'gather_strength_gain': 0.002,
+                    'gather_intelligence_gain': 0.006,
+                    'gather_communication_gain': 0.005,
+                    'adaptation_cap_delta': 0.35,
+                    'innate_pull_rate': 0.03
+                },
+                'competition': {
+                    'competition_probability': 0.03,
+                    'resource_transfer_rate': 0.08,
+                    'population_pressure_factor': 0.2,
+                    'battle_casualty_scale': 0.07,
+                    'battle_injury_scale': 0.16
+                }
+            }
+        },
+
+        'tool_crafting_enabled': {
+            'description': '工具经济开启 - 工匠打造石器并提升生产效率',
+            'config': {
+                'initial_population': 120,
+                'max_simulation_months': 1200,
+                'base_k': 500,
+                'population_structure': 'ability_multi_tribe',
+                'tribe_count': 4,
+                'checkpoint_interval': 100
+            },
+            'mechanisms': {
+                'activity': {
+                    'hunting_risk': 0.05,
+                    'min_hunter_strength': 0.65,
+                    'min_hunter_intelligence': 0.9,
+                    'protect_fertile_female': True,
+                    'hunter_ratio': 0.26,
+                    'enable_crafting': True,
+                    'crafter_ratio': 0.1,
+                    'min_crafter_intelligence': 1.0
+                },
+                'production': {
+                    'meat_protein_content': 0.8,
+                    'plant_protein_content': 0.2,
+                    'hunting_base_yield': 17.0,
+                    'gathering_base_yield': 10.5,
+                    'tool_material_gather_base': 0.3,
+                    'tool_crafting_efficiency': 1.0,
+                    'tool_hunting_bonus_max': 0.28,
+                    'tool_gathering_bonus_max': 0.16,
+                    'tool_decay_rate': 0.035,
+                    'tool_use_per_hunter': 0.04,
+                    'tool_use_per_gatherer': 0.015,
+                    'spoilage_rate': 0.08
+                },
+                'mortality': {
+                    'base_mortality': 0.001,
+                    'hunting_mortality': 0.008,
+                    'hunting_injury': 0.16,
+                    'pregnancy_mortality': 0.001,
+                    'infant_mortality': 0.01,
+                    'old_age_start': 65,
+                    'resource_threshold': 0.5,
+                    'injury_worsen_rate': 0.2,
+                    'injury_recover_rate': 0.3
+                },
+                'reproduction': {
+                    'gestation_months': 9,
+                    'fertility_cycle': 1,
+                    'min_resources_for_pregnancy': 1.0,
+                    'male_competition_factor': 0.3,
+                    'cross_tribe_mating_rate': 0.05
+                },
+                'distribution': {
+                    'base_consumption': 1.2,
+                    'pregnancy_extra': 0.8,
+                    'hunter_bonus': 0.15,
+                    'gatherer_bonus': 0.02,
+                    'crafter_bonus': 0.12,
+                    'child_priority': True
+                },
+                'adaptation': {
+                    'hunting_exp_gain': 0.14,
+                    'gathering_exp_gain': 0.12,
+                    'cross_decay': 0.04,
+                    'adaptation_cap_delta': 0.35,
+                    'innate_pull_rate': 0.03
+                },
+                'competition': {
+                    'competition_probability': 0.03,
+                    'resource_transfer_rate': 0.08,
+                    'population_pressure_factor': 0.2,
+                    'battle_casualty_scale': 0.07,
+                    'battle_injury_scale': 0.16
+                }
+            }
+        },
+
+        'ablation_neutral_hunt_threshold': {
+            'description': '消融：狩猎门槛性别中性',
+            'config': {
+                'initial_population': 120,
+                'max_simulation_months': 1200,
+                'base_k': 500,
+                'population_structure': 'ability_multi_tribe',
+                'tribe_count': 4,
+                'checkpoint_interval': 100
+            },
+            'mechanisms': {
+                'activity': {
+                    'hunting_risk': 0.05,
+                    'min_hunter_strength': 0.65,
+                    'min_hunter_intelligence': 0.9,
+                    'protect_fertile_female': True,
+                    'hunter_ratio': 0.3,
+                    'enable_crafting': False,
+                    'crafter_ratio': 0.08,
+                    'min_crafter_intelligence': 0.95
+                },
+                'production': {
+                    'meat_protein_content': 0.8,
+                    'plant_protein_content': 0.2,
+                    'hunting_base_yield': 18.0,
+                    'gathering_base_yield': 11.0,
+                    'tool_material_gather_base': 0.25,
+                    'tool_crafting_efficiency': 0.9,
+                    'tool_hunting_bonus_max': 0.2,
+                    'tool_gathering_bonus_max': 0.12,
+                    'tool_decay_rate': 0.03,
+                    'spoilage_rate': 0.08
+                },
+                'mortality': {
+                    'base_mortality': 0.001,
+                    'hunting_mortality': 0.008,
+                    'hunting_injury': 0.16,
+                    'pregnancy_mortality': 0.001,
+                    'infant_mortality': 0.01,
+                    'old_age_start': 65,
+                    'resource_threshold': 0.5,
+                    'injury_worsen_rate': 0.2,
+                    'injury_recover_rate': 0.3
+                },
+                'reproduction': {
+                    'gestation_months': 9,
+                    'fertility_cycle': 1,
+                    'min_resources_for_pregnancy': 1.0,
+                    'male_competition_factor': 0.3,
+                    'cross_tribe_mating_rate': 0.05
+                },
+                'distribution': {
+                    'base_consumption': 1.2,
+                    'pregnancy_extra': 0.8,
+                    'hunter_bonus': 0.15,
+                    'child_priority': True
+                },
+                'adaptation': {
+                    'hunting_exp_gain': 0.14,
+                    'gathering_exp_gain': 0.12,
+                    'cross_decay': 0.04,
+                    'adaptation_cap_delta': 0.35,
+                    'innate_pull_rate': 0.03
+                },
+                'competition': {
+                    'competition_probability': 0.03,
+                    'resource_transfer_rate': 0.08,
+                    'population_pressure_factor': 0.2,
+                    'battle_casualty_scale': 0.07,
+                    'battle_injury_scale': 0.16
+                }
+            }
+        },
+
+        'ablation_no_cycle_avoidance': {
+            'description': '消融：取消经期狩猎规避',
+            'config': {
+                'initial_population': 120,
+                'max_simulation_months': 1200,
+                'base_k': 500,
+                'population_structure': 'ability_multi_tribe',
+                'tribe_count': 4,
+                'checkpoint_interval': 100
+            },
+            'mechanisms': {
+                'activity': {
+                    'hunting_risk': 0.05,
+                    'min_hunter_strength': 0.65,
+                    'min_hunter_intelligence': 0.9,
+                    'protect_fertile_female': True,
+                    'hunter_ratio': 0.3,
+                    'menstrual_hunt_avoidance_rate': 0.0
                 },
                 'production': {
                     'meat_protein_content': 0.8,
@@ -71,12 +309,76 @@ class ConfigRegistry:
                     'hunting_exp_gain': 0.14,
                     'gathering_exp_gain': 0.12,
                     'cross_decay': 0.04,
-                    'hunt_strength_gain': 0.006,
-                    'hunt_intelligence_gain': 0.003,
-                    'hunt_communication_gain': 0.003,
-                    'gather_strength_gain': 0.002,
-                    'gather_intelligence_gain': 0.006,
-                    'gather_communication_gain': 0.005,
+                    'adaptation_cap_delta': 0.35,
+                    'innate_pull_rate': 0.03
+                },
+                'competition': {
+                    'competition_probability': 0.03,
+                    'resource_transfer_rate': 0.08,
+                    'population_pressure_factor': 0.2,
+                    'battle_casualty_scale': 0.07,
+                    'battle_injury_scale': 0.16
+                }
+            }
+        },
+
+        'ablation_symmetric_hunt_risk': {
+            'description': '消融：取消经期/孕期狩猎额外风险',
+            'config': {
+                'initial_population': 120,
+                'max_simulation_months': 1200,
+                'base_k': 500,
+                'population_structure': 'ability_multi_tribe',
+                'tribe_count': 4,
+                'checkpoint_interval': 100
+            },
+            'mechanisms': {
+                'activity': {
+                    'hunting_risk': 0.05,
+                    'min_hunter_strength': 0.65,
+                    'min_hunter_intelligence': 0.9,
+                    'protect_fertile_female': True,
+                    'hunter_ratio': 0.3
+                },
+                'production': {
+                    'meat_protein_content': 0.8,
+                    'plant_protein_content': 0.2,
+                    'hunting_base_yield': 18.0,
+                    'gathering_base_yield': 11.0,
+                    'spoilage_rate': 0.08
+                },
+                'mortality': {
+                    'base_mortality': 0.001,
+                    'hunting_mortality': 0.008,
+                    'hunting_injury': 0.16,
+                    'pregnancy_mortality': 0.001,
+                    'infant_mortality': 0.01,
+                    'old_age_start': 65,
+                    'resource_threshold': 0.5,
+                    'injury_worsen_rate': 0.2,
+                    'injury_recover_rate': 0.3,
+                    'menstrual_hunting_extra_mortality': 0.0,
+                    'menstrual_hunting_extra_injury': 0.0,
+                    'pregnancy_hunting_extra_mortality': 0.0,
+                    'pregnancy_hunting_extra_injury': 0.0
+                },
+                'reproduction': {
+                    'gestation_months': 9,
+                    'fertility_cycle': 1,
+                    'min_resources_for_pregnancy': 1.0,
+                    'male_competition_factor': 0.3,
+                    'cross_tribe_mating_rate': 0.05
+                },
+                'distribution': {
+                    'base_consumption': 1.2,
+                    'pregnancy_extra': 0.8,
+                    'hunter_bonus': 0.15,
+                    'child_priority': True
+                },
+                'adaptation': {
+                    'hunting_exp_gain': 0.14,
+                    'gathering_exp_gain': 0.12,
+                    'cross_decay': 0.04,
                     'adaptation_cap_delta': 0.35,
                     'innate_pull_rate': 0.03
                 },
